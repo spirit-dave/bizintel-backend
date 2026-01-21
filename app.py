@@ -11,7 +11,10 @@ app.secret_key = "bizintel-secret-key"  # required for sessions
 CORS(
     app,
     supports_credentials=True,
-    origins=["http://localhost:5173"]  # Vite default
+    origins=[
+        "http://localhost:5173",
+        "https://bizintel.netlify.app"
+    ]
 )
 
 def normalize_url(url):
