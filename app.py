@@ -9,7 +9,6 @@ import os
 app = Flask(__name__)
 
 # ---------------- CORS CONFIG ----------------
-# Allow local dev and Netlify frontend
 CORS(
     app,
     resources={r"/api/*": {"origins": [
@@ -47,7 +46,10 @@ def scrape():
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
                     "Chrome/120.0 Safari/537.36"
-                )
+                ),
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Connection": "keep-alive",
             }
         )
         res.raise_for_status()
@@ -71,11 +73,53 @@ def scrape():
         return jsonify(business_data)
 
     except Exception as e:
-        print("SCRAPE ERROR:", repr(e))
+        print("SCRAPE ERROR:", repr(e), "URL:", url)
         return jsonify({
             "error": "Scraping failed",
             "details": str(e)
         }), 500
+
+@app.route("/api/chat", methods=["POST"])
+def chat():
+    data = request.get_json(silent=True) or {}
+    
+    message = data.get("message", "").strip()
+    business = data.get("business_data") or {}
+
+    if not message:
+        return jsonify({"message": "Please ask a question."}), 400
+
+    if not business:
+        return jsonify({
+            "message": "I don’t have any business data yet. Please scrape a website first."
+        }), 400
+
+    name = business.get("name", "This company")
+    description = business.get("description", "")
+    emails = business.get("emails", [])
+    phones = business.get("phones", [])
+
+    message_lower = message.lower()
+
+    # --- simple AI-like responses ---
+    if "market" in message_lower or "sector" in message_lower:
+        response = f"{name} operates in multiple sectors. Based on scraped info, its main markets include manufacturing, services, and consumer products."
+    elif "competitor" in message_lower:
+        response = f"{name}'s competitors vary by industry. Regional companies and multinationals are typically the main competitors."
+    elif "revenue" in message_lower or "money" in message_lower:
+        response = f"{name}'s revenue primarily comes from its core operations and local market dominance."
+    else:
+        response = (
+            f"Here’s what I know about {name}:\n\n"
+            f"{description}\n\n"
+            f"Contacts found: {len(emails)} emails, {len(phones)} phone numbers.\n\n"
+            "You can ask about markets, competitors, or revenue models."
+        )
+
+    return jsonify({
+        "role": "assistant",
+        "message": response
+    })
 
 # ---------------- ENTRY ----------------
 if __name__ == "__main__":
