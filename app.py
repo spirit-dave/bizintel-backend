@@ -5,17 +5,17 @@ from bs4 import BeautifulSoup
 import re
 import time
 import os
-
-# ---------------- GEMINI SETUP ----------------
 from google.genai import Client
 
+# ---------------- GEMINI SETUP ----------------
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
-    raise RuntimeError("GEMINI_API_KEY is not set")
+    raise RuntimeError("GEMINI_API_KEY is not set in environment variables")
 
 client = Client(api_key=GEMINI_API_KEY)
+MODEL_NAME = "gemini-3-flash-1"  # Latest Gemini 3 Flash model
 
-# ---------------- Flask App ----------------
+# ---------------- FLASK APP ----------------
 app = Flask(__name__)
 
 # ---------------- CORS ----------------
@@ -27,12 +27,12 @@ CORS(
     ]}}
 )
 
-# ---------------- Cache ----------------
+# ---------------- CACHE ----------------
 # Structure: cache[business_name][question] = response
 cache = {}
 
-# ---------------- UTIL ----------------
-def normalize_url(url):
+# ---------------- UTILS ----------------
+def normalize_url(url: str) -> str:
     if not url.startswith(("http://", "https://")):
         return "https://" + url
     return url
@@ -83,7 +83,7 @@ def scrape():
             "metadata": f"Scraped in {round(time.time() - start, 2)}s"
         }
 
-        # Initialize cache for business
+        # Initialize cache for this business
         cache.setdefault(business_data["name"], {})
 
         return jsonify(business_data)
@@ -104,9 +104,8 @@ def chat():
 
     if not message:
         return jsonify({"message": "Please ask a question."}), 400
-
     if not business:
-        return jsonify({"message": "Please scrape a website first so I have data to analyze."}), 400
+        return jsonify({"message": "Please scrape a website first."}), 400
 
     name = business.get("name", "Unknown Business")
     description = business.get("description", "")
@@ -151,15 +150,15 @@ Instructions:
 """
 
     try:
-        # Generate response using new google-genai package
         response = client.generate_text(
-            model="gemini-1.5",
+            model=MODEL_NAME,
             prompt=prompt,
-            temperature=0.7
+            temperature=0.7,
+            max_output_tokens=500
         )
         ai_text = response.text.strip()
 
-        # Save in cache
+        # Save to cache
         cache[name][message] = ai_text
 
         return jsonify({
