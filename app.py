@@ -5,16 +5,15 @@ from bs4 import BeautifulSoup
 import re
 import time
 import os
-import google.generativeai as genai
 
 # ---------------- GEMINI SETUP ----------------
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+from google_genai import Client
 
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise RuntimeError("GEMINI_API_KEY is not set")
 
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+client = Client(api_key=GEMINI_API_KEY)
 
 # ---------------- Flask App ----------------
 app = Flask(__name__)
@@ -29,8 +28,7 @@ CORS(
 )
 
 # ---------------- Cache ----------------
-# Structure:
-# cache[business_name][question] = response
+# Structure: cache[business_name][question] = response
 cache = {}
 
 # ---------------- UTIL ----------------
@@ -91,7 +89,7 @@ def scrape():
         return jsonify(business_data)
 
     except Exception as e:
-        print("SCRAPE ERROR:", repr(e))
+        print("SCRAPE ERROR:", repr(e), "URL:", url)
         return jsonify({
             "error": "Scraping failed",
             "details": str(e)
@@ -108,9 +106,7 @@ def chat():
         return jsonify({"message": "Please ask a question."}), 400
 
     if not business:
-        return jsonify({
-            "message": "Please scrape a website first so I have data to analyze."
-        }), 400
+        return jsonify({"message": "Please scrape a website first so I have data to analyze."}), 400
 
     name = business.get("name", "Unknown Business")
     description = business.get("description", "")
@@ -155,9 +151,15 @@ Instructions:
 """
 
     try:
-        response = model.generate_content(prompt)
+        # Generate response using new google-genai package
+        response = client.generate_text(
+            model="gemini-1.5",
+            prompt=prompt,
+            temperature=0.7
+        )
         ai_text = response.text.strip()
 
+        # Save in cache
         cache[name][message] = ai_text
 
         return jsonify({
