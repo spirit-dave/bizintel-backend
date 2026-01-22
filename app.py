@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 import re
 import time
 import os
-from google.genai import Client, types  # ✅ correct import for latest SDK
+from google.genai import Client
 
 # ---------------- GEMINI SETUP ----------------
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -13,7 +13,7 @@ if not GEMINI_API_KEY:
     raise RuntimeError("GEMINI_API_KEY is not set")
 
 client = Client(api_key=GEMINI_API_KEY)
-MODEL_NAME = "gemini-3-flash-1"  # Latest Gemini 3 Flash model
+MODEL_NAME = "gemini-3-flash"  # Latest Gemini 3 Flash model
 
 # ---------------- Flask App ----------------
 app = Flask(__name__)
@@ -28,6 +28,7 @@ CORS(
 )
 
 # ---------------- Cache ----------------
+# Structure: cache[business_name][question] = response
 cache = {}
 
 # ---------------- UTIL ----------------
@@ -40,6 +41,7 @@ def normalize_url(url):
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})
+
 
 @app.route("/api/scrape", methods=["POST"])
 def scrape():
@@ -82,14 +84,16 @@ def scrape():
         }
 
         cache.setdefault(business_data["name"], {})
+
         return jsonify(business_data)
 
     except Exception as e:
-        print("SCRAPE ERROR:", repr(e), "URL:", url)
+        print("SCRAPE ERROR:", repr(e))
         return jsonify({
             "error": "Scraping failed",
             "details": str(e)
         }), 500
+
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
@@ -100,7 +104,7 @@ def chat():
     if not message:
         return jsonify({"message": "Please ask a question."}), 400
     if not business:
-        return jsonify({"message": "Please scrape a website first so I have data to analyze."}), 400
+        return jsonify({"message": "Please scrape a website first."}), 400
 
     name = business.get("name", "Unknown Business")
     description = business.get("description", "")
@@ -116,6 +120,7 @@ def chat():
             "cached": True
         })
 
+    # -------- SMART PROMPT --------
     prompt = f"""
 You are a senior business intelligence analyst.
 
@@ -143,20 +148,14 @@ Instructions:
 """
 
     try:
-        # ✅ Correct Gemini 3 Flash call
-        response = client.chat(
+        response = client.generate_text(
             model=MODEL_NAME,
-            messages=[
-                types.ChatMessage(
-                    author="user",
-                    content=prompt
-                )
-            ],
+            text=prompt,
             temperature=0.7,
-            max_output_tokens=500
+            max_output_tokens=512
         )
 
-        ai_text = response.choices[0].content[0].text.strip()
+        ai_text = response.result.strip()
         cache[name][message] = ai_text
 
         return jsonify({
@@ -171,6 +170,7 @@ Instructions:
             "error": "AI generation failed",
             "details": str(e)
         }), 500
+
 
 # ---------------- ENTRY ----------------
 if __name__ == "__main__":
