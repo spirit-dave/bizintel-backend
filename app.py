@@ -5,10 +5,15 @@ from bs4 import BeautifulSoup
 import re
 import time
 import os
+import openai
 
+# ---------------- OpenAI API ----------------
+openai.api_key = os.environ.get("OPENAI_API_KEY")  # Set on Railway
+
+# ---------------- Flask App ----------------
 app = Flask(__name__)
 
-# ---------------- CORS CONFIG ----------------
+# ---------------- CORS ----------------
 CORS(
     app,
     resources={r"/api/*": {"origins": [
@@ -16,6 +21,10 @@ CORS(
         "https://bizintel.netlify.app"
     ]}}
 )
+
+# ---------------- Cache ----------------
+# Simple in-memory cache: {business_name: {question: response}}
+cache = {}
 
 # ---------------- UTIL ----------------
 def normalize_url(url):
@@ -70,6 +79,10 @@ def scrape():
             "metadata": f"Scraped in {round(time.time() - start, 2)}s"
         }
 
+        # Initialize cache for this business if not exists
+        if business_data["name"] not in cache:
+            cache[business_data["name"]] = {}
+
         return jsonify(business_data)
 
     except Exception as e:
@@ -82,46 +95,64 @@ def scrape():
 @app.route("/api/chat", methods=["POST"])
 def chat():
     data = request.get_json(silent=True) or {}
-    
     message = data.get("message", "").strip()
     business = data.get("business_data") or {}
 
     if not message:
         return jsonify({"message": "Please ask a question."}), 400
-
     if not business:
+        return jsonify({"message": "Please scrape a website first."}), 400
+
+    name = business.get("name", "Unknown Business")
+
+    # Initialize cache for this business if not exists
+    if name not in cache:
+        cache[name] = {}
+
+    # Check if this question was already asked
+    if message in cache[name]:
         return jsonify({
-            "message": "I don’t have any business data yet. Please scrape a website first."
-        }), 400
+            "role": "assistant",
+            "message": cache[name][message],
+            "cached": True
+        })
 
-    name = business.get("name", "This company")
-    description = business.get("description", "")
-    emails = business.get("emails", [])
-    phones = business.get("phones", [])
+    # Prepare context for GPT
+    context = f"""
+    You are a helpful business analyst. Use the following scraped information to answer questions:
 
-    message_lower = message.lower()
+    Company Name: {name}
+    Description: {business.get('description', '')}
+    Emails: {business.get('emails', [])}
+    Phones: {business.get('phones', [])}
+    """
 
-    # --- simple AI-like responses ---
-    if "market" in message_lower or "sector" in message_lower:
-        response = f"{name} operates in multiple sectors. Based on scraped info, its main markets include manufacturing, services, and consumer products."
-    elif "competitor" in message_lower:
-        response = f"{name}'s competitors vary by industry. Regional companies and multinationals are typically the main competitors."
-    elif "revenue" in message_lower or "money" in message_lower:
-        response = f"{name}'s revenue primarily comes from its core operations and local market dominance."
-    else:
-        response = (
-            f"Here’s what I know about {name}:\n\n"
-            f"{description}\n\n"
-            f"Contacts found: {len(emails)} emails, {len(phones)} phone numbers.\n\n"
-            "You can ask about markets, competitors, or revenue models."
+    try:
+        completion = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": context},
+                {"role": "user", "content": message}
+            ],
+            temperature=0.7,
         )
 
-    return jsonify({
-        "role": "assistant",
-        "message": response
-    })
+        ai_response = completion.choices[0].message["content"]
+
+        # Save in cache
+        cache[name][message] = ai_response
+
+        return jsonify({
+            "role": "assistant",
+            "message": ai_response,
+            "cached": False
+        })
+
+    except Exception as e:
+        print("AI ERROR:", repr(e))
+        return jsonify({"error": "AI generation failed", "details": str(e)}), 500
 
 # ---------------- ENTRY ----------------
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # Railway sets this automatically
+    port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
