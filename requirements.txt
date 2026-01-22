@@ -1,6 +1,6 @@
-Flask==2.3.6
-flask-cors==4.0.1
-requests==2.31.0
-beautifulsoup4==4.12.2
-gunicorn==23.2.1
-google-genai==0.17.0  # latest stable Gemini 3 SDK
+Flask
+flask-cors
+requests
+beautifulsoup4
+gunicorn
+google-genai==0.17.0
