@@ -5,10 +5,16 @@ from bs4 import BeautifulSoup
 import re
 import time
 import os
-import openai
+import google.generativeai as genai
 
-# ---------------- OpenAI API ----------------
-openai.api_key = os.environ.get("OPENAI_API_KEY")  # Set on Railway
+# ---------------- GEMINI SETUP ----------------
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+
+if not GEMINI_API_KEY:
+    raise RuntimeError("GEMINI_API_KEY is not set")
+
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 # ---------------- Flask App ----------------
 app = Flask(__name__)
@@ -23,7 +29,8 @@ CORS(
 )
 
 # ---------------- Cache ----------------
-# Simple in-memory cache: {business_name: {question: response}}
+# Structure:
+# cache[business_name][question] = response
 cache = {}
 
 # ---------------- UTIL ----------------
@@ -36,6 +43,7 @@ def normalize_url(url):
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})
+
 
 @app.route("/api/scrape", methods=["POST"])
 def scrape():
@@ -57,8 +65,6 @@ def scrape():
                     "Chrome/120.0 Safari/537.36"
                 ),
                 "Accept-Language": "en-US,en;q=0.9",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Connection": "keep-alive",
             }
         )
         res.raise_for_status()
@@ -79,37 +85,41 @@ def scrape():
             "metadata": f"Scraped in {round(time.time() - start, 2)}s"
         }
 
-        # Initialize cache for this business if not exists
-        if business_data["name"] not in cache:
-            cache[business_data["name"]] = {}
+        # Initialize cache for business
+        cache.setdefault(business_data["name"], {})
 
         return jsonify(business_data)
 
     except Exception as e:
-        print("SCRAPE ERROR:", repr(e), "URL:", url)
+        print("SCRAPE ERROR:", repr(e))
         return jsonify({
             "error": "Scraping failed",
             "details": str(e)
         }), 500
 
+
 @app.route("/api/chat", methods=["POST"])
 def chat():
     data = request.get_json(silent=True) or {}
     message = data.get("message", "").strip()
-    business = data.get("business_data") or {}
+    business = data.get("business_data")
 
     if not message:
         return jsonify({"message": "Please ask a question."}), 400
+
     if not business:
-        return jsonify({"message": "Please scrape a website first."}), 400
+        return jsonify({
+            "message": "Please scrape a website first so I have data to analyze."
+        }), 400
 
     name = business.get("name", "Unknown Business")
+    description = business.get("description", "")
+    emails = ", ".join(business.get("emails", [])) or "None found"
+    phones = ", ".join(business.get("phones", [])) or "None found"
 
-    # Initialize cache for this business if not exists
-    if name not in cache:
-        cache[name] = {}
+    cache.setdefault(name, {})
 
-    # Check if this question was already asked
+    # Return cached response if exists
     if message in cache[name]:
         return jsonify({
             "role": "assistant",
@@ -117,40 +127,52 @@ def chat():
             "cached": True
         })
 
-    # Prepare context for GPT
-    context = f"""
-    You are a helpful business analyst. Use the following scraped information to answer questions:
+    # -------- SMART PROMPT --------
+    prompt = f"""
+You are a senior business intelligence analyst.
 
-    Company Name: {name}
-    Description: {business.get('description', '')}
-    Emails: {business.get('emails', [])}
-    Phones: {business.get('phones', [])}
-    """
+Business Name:
+{name}
+
+Description:
+{description}
+
+Emails:
+{emails}
+
+Phone Numbers:
+{phones}
+
+User Question:
+{message}
+
+Instructions:
+- Think step by step
+- Be clear and practical
+- Do NOT hallucinate facts
+- If information is missing, explain logically
+- Give insights a real consultant would give
+"""
 
     try:
-        completion = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": context},
-                {"role": "user", "content": message}
-            ],
-            temperature=0.7,
-        )
+        response = model.generate_content(prompt)
+        ai_text = response.text.strip()
 
-        ai_response = completion.choices[0].message["content"]
-
-        # Save in cache
-        cache[name][message] = ai_response
+        cache[name][message] = ai_text
 
         return jsonify({
             "role": "assistant",
-            "message": ai_response,
+            "message": ai_text,
             "cached": False
         })
 
     except Exception as e:
         print("AI ERROR:", repr(e))
-        return jsonify({"error": "AI generation failed", "details": str(e)}), 500
+        return jsonify({
+            "error": "AI generation failed",
+            "details": str(e)
+        }), 500
+
 
 # ---------------- ENTRY ----------------
 if __name__ == "__main__":
