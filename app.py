@@ -7,7 +7,7 @@ import time
 import os
 
 # ---------------- GEMINI SETUP ----------------
-from google_genai import Client
+from google.genai import Client
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
