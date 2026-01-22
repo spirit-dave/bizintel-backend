@@ -148,14 +148,14 @@ Instructions:
 """
 
     try:
-        response = client.generate_text(
+        response = client.generate(
             model=MODEL_NAME,
-            text=prompt,
+            prompt=prompt,
             temperature=0.7,
             max_output_tokens=512
         )
 
-        ai_text = response.result.strip()
+        ai_text = response.output_text.strip()
         cache[name][message] = ai_text
 
         return jsonify({
