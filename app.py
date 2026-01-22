@@ -4,29 +4,27 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import time
+import os
 
 app = Flask(__name__)
 
-# ✅ CORS — allow Netlify frontend
+# ---------------- CORS CONFIG ----------------
+# Allow local dev and Netlify frontend
 CORS(
     app,
-    resources={r"/api/*": {
-        "origins": [
-            "http://localhost:5173",
-            "https://bizintel.netlify.app"
-        ]
-    }}
+    resources={r"/api/*": {"origins": [
+        "http://localhost:5173",
+        "https://bizintel.netlify.app"
+    ]}}
 )
 
 # ---------------- UTIL ----------------
-
 def normalize_url(url):
     if not url.startswith(("http://", "https://")):
         return "https://" + url
     return url
 
 # ---------------- ROUTES ----------------
-
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})
@@ -52,7 +50,6 @@ def scrape():
                 )
             }
         )
-
         res.raise_for_status()
 
         soup = BeautifulSoup(res.text, "html.parser")
@@ -81,9 +78,6 @@ def scrape():
         }), 500
 
 # ---------------- ENTRY ----------------
-
-import os
-
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 5000))  # Railway sets this automatically
     app.run(host="0.0.0.0", port=port)
