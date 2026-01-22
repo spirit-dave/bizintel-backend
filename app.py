@@ -5,17 +5,17 @@ from bs4 import BeautifulSoup
 import re
 import time
 import os
-from google.genai import Client
+from google.genai import Client  # ✅ Updated import for latest SDK
 
 # ---------------- GEMINI SETUP ----------------
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
-    raise RuntimeError("GEMINI_API_KEY is not set in environment variables")
+    raise RuntimeError("GEMINI_API_KEY is not set")
 
 client = Client(api_key=GEMINI_API_KEY)
 MODEL_NAME = "gemini-3-flash-1"  # Latest Gemini 3 Flash model
 
-# ---------------- FLASK APP ----------------
+# ---------------- Flask App ----------------
 app = Flask(__name__)
 
 # ---------------- CORS ----------------
@@ -27,12 +27,12 @@ CORS(
     ]}}
 )
 
-# ---------------- CACHE ----------------
+# ---------------- Cache ----------------
 # Structure: cache[business_name][question] = response
 cache = {}
 
-# ---------------- UTILS ----------------
-def normalize_url(url: str) -> str:
+# ---------------- UTIL ----------------
+def normalize_url(url):
     if not url.startswith(("http://", "https://")):
         return "https://" + url
     return url
@@ -41,7 +41,6 @@ def normalize_url(url: str) -> str:
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})
-
 
 @app.route("/api/scrape", methods=["POST"])
 def scrape():
@@ -95,7 +94,6 @@ def scrape():
             "details": str(e)
         }), 500
 
-
 @app.route("/api/chat", methods=["POST"])
 def chat():
     data = request.get_json(silent=True) or {}
@@ -105,13 +103,14 @@ def chat():
     if not message:
         return jsonify({"message": "Please ask a question."}), 400
     if not business:
-        return jsonify({"message": "Please scrape a website first."}), 400
+        return jsonify({"message": "Please scrape a website first so I have data to analyze."}), 400
 
     name = business.get("name", "Unknown Business")
     description = business.get("description", "")
     emails = ", ".join(business.get("emails", [])) or "None found"
     phones = ", ".join(business.get("phones", [])) or "None found"
 
+    # Initialize cache
     cache.setdefault(name, {})
 
     # Return cached response if exists
@@ -150,15 +149,14 @@ Instructions:
 """
 
     try:
-        response = client.generate_text(
+        response = client.generate(
             model=MODEL_NAME,
-            prompt=prompt,
+            input=prompt,
             temperature=0.7,
             max_output_tokens=500
         )
-        ai_text = response.text.strip()
 
-        # Save to cache
+        ai_text = response.output_text.strip()
         cache[name][message] = ai_text
 
         return jsonify({
@@ -173,7 +171,6 @@ Instructions:
             "error": "AI generation failed",
             "details": str(e)
         }), 500
-
 
 # ---------------- ENTRY ----------------
 if __name__ == "__main__":
