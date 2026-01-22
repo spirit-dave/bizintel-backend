@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 import re
 import time
 import os
-from google.genai import Client  # ✅ Updated import for latest SDK
+from google.genai import Client, types  # ✅ correct import for latest SDK
 
 # ---------------- GEMINI SETUP ----------------
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -28,7 +28,6 @@ CORS(
 )
 
 # ---------------- Cache ----------------
-# Structure: cache[business_name][question] = response
 cache = {}
 
 # ---------------- UTIL ----------------
@@ -82,9 +81,7 @@ def scrape():
             "metadata": f"Scraped in {round(time.time() - start, 2)}s"
         }
 
-        # Initialize cache for this business
         cache.setdefault(business_data["name"], {})
-
         return jsonify(business_data)
 
     except Exception as e:
@@ -110,10 +107,8 @@ def chat():
     emails = ", ".join(business.get("emails", [])) or "None found"
     phones = ", ".join(business.get("phones", [])) or "None found"
 
-    # Initialize cache
     cache.setdefault(name, {})
 
-    # Return cached response if exists
     if message in cache[name]:
         return jsonify({
             "role": "assistant",
@@ -121,7 +116,6 @@ def chat():
             "cached": True
         })
 
-    # -------- SMART PROMPT --------
     prompt = f"""
 You are a senior business intelligence analyst.
 
@@ -149,14 +143,20 @@ Instructions:
 """
 
     try:
-        response = client.generate(
+        # ✅ Correct Gemini 3 Flash call
+        response = client.chat(
             model=MODEL_NAME,
-            input=prompt,
+            messages=[
+                types.ChatMessage(
+                    author="user",
+                    content=prompt
+                )
+            ],
             temperature=0.7,
             max_output_tokens=500
         )
 
-        ai_text = response.output_text.strip()
+        ai_text = response.choices[0].content[0].text.strip()
         cache[name][message] = ai_text
 
         return jsonify({
