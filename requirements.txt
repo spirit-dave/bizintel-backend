@@ -3,4 +3,4 @@ flask-cors==6.0.2
 requests==2.32.5
 beautifulsoup4==4.14.3
 gunicorn==23.0.0
-google-genai==1.60.0
+google-generativeai

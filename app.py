@@ -5,39 +5,54 @@ from bs4 import BeautifulSoup
 import re
 import time
 import os
-from google.genai import Client
+import google.generativeai as genai
 
-# ---------------- GEMINI SETUP ----------------
+# -------------------------------------------------
+# GEMINI CONFIG
+# -------------------------------------------------
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise RuntimeError("GEMINI_API_KEY is not set")
 
-client = Client(api_key=GEMINI_API_KEY)
-MODEL_NAME = "gemini-3-flash"  # Latest Gemini 3 Flash model
+genai.configure(api_key=GEMINI_API_KEY)
 
-# ---------------- Flask App ----------------
+MODEL_NAME = "gemini-2.5-flash"
+
+# -------------------------------------------------
+# FLASK APP
+# -------------------------------------------------
 app = Flask(__name__)
 
-# ---------------- CORS ----------------
 CORS(
     app,
-    resources={r"/api/*": {"origins": [
-        "http://localhost:5173",
-        "https://bizintel.netlify.app"
-    ]}}
+    resources={
+        r"/api/*": {
+            "origins": [
+                "http://localhost:5173",
+                "https://bizintel.netlify.app"
+            ]
+        }
+    }
 )
 
-# ---------------- Cache ----------------
-# Structure: cache[business_name][question] = response
+# -------------------------------------------------
+# SIMPLE IN-MEMORY CACHE
+# cache[business_name][question] = response
+# -------------------------------------------------
 cache = {}
 
-# ---------------- UTIL ----------------
-def normalize_url(url):
+# -------------------------------------------------
+# UTIL
+# -------------------------------------------------
+def normalize_url(url: str) -> str:
     if not url.startswith(("http://", "https://")):
         return "https://" + url
     return url
 
-# ---------------- ROUTES ----------------
+
+# -------------------------------------------------
+# ROUTES
+# -------------------------------------------------
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})
@@ -46,6 +61,7 @@ def health():
 @app.route("/api/scrape", methods=["POST"])
 def scrape():
     data = request.get_json(silent=True)
+
     if not data or "url" not in data:
         return jsonify({"error": "URL is required"}), 400
 
@@ -61,8 +77,7 @@ def scrape():
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
                     "Chrome/120.0 Safari/537.36"
-                ),
-                "Accept-Language": "en-US,en;q=0.9",
+                )
             }
         )
         res.raise_for_status()
@@ -98,11 +113,13 @@ def scrape():
 @app.route("/api/chat", methods=["POST"])
 def chat():
     data = request.get_json(silent=True) or {}
+
     message = data.get("message", "").strip()
     business = data.get("business_data")
 
     if not message:
         return jsonify({"message": "Please ask a question."}), 400
+
     if not business:
         return jsonify({"message": "Please scrape a website first."}), 400
 
@@ -113,6 +130,7 @@ def chat():
 
     cache.setdefault(name, {})
 
+    # -------- CACHE HIT --------
     if message in cache[name]:
         return jsonify({
             "role": "assistant",
@@ -120,42 +138,45 @@ def chat():
             "cached": True
         })
 
-    # -------- SMART PROMPT --------
+    # -------------------------------------------------
+    # PROMPT (BUSINESS-FOCUSED, NO HALLUCINATIONS)
+    # -------------------------------------------------
     prompt = f"""
-You are a senior business intelligence analyst.
+You are a senior business intelligence consultant.
 
-Business Name:
+Business name:
 {name}
 
-Description:
+Public description:
 {description}
 
-Emails:
-{emails}
+Contact signals:
+Emails: {emails}
+Phones: {phones}
 
-Phone Numbers:
-{phones}
-
-User Question:
+User question:
 {message}
 
-Instructions:
-- Think step by step
-- Be clear and practical
-- Do NOT hallucinate facts
-- If information is missing, explain logically
-- Give insights a real consultant would give
+Rules:
+- Base insights ONLY on available information
+- If data is missing, explain logically instead of guessing
+- Provide practical, real-world business insight
+- No hype, no fluff, no hallucinations
 """
 
     try:
-        response = client.generate(
-            model=MODEL_NAME,
-            prompt=prompt,
-            temperature=0.7,
-            max_output_tokens=512
+        model = genai.GenerativeModel(MODEL_NAME)
+
+        response = model.generate_content(
+            prompt,
+            generation_config={
+                "temperature": 0.7,
+                "max_output_tokens": 512,
+            }
         )
 
-        ai_text = response.output_text.strip()
+        ai_text = response.text.strip()
+
         cache[name][message] = ai_text
 
         return jsonify({
@@ -172,7 +193,9 @@ Instructions:
         }), 500
 
 
-# ---------------- ENTRY ----------------
+# -------------------------------------------------
+# ENTRY
+# -------------------------------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
