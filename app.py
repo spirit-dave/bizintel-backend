@@ -1,10 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import requests
+import requests, re, time, os
 from bs4 import BeautifulSoup
-import re
-import time
-import os
 import google.generativeai as genai
 
 # -------------------------------------------------
@@ -15,53 +12,43 @@ if not GEMINI_API_KEY:
     raise RuntimeError("GEMINI_API_KEY is not set")
 
 genai.configure(api_key=GEMINI_API_KEY)
-
 MODEL_NAME = "gemini-2.5-flash"
+
+model = genai.GenerativeModel(MODEL_NAME)
 
 # -------------------------------------------------
 # FLASK APP
 # -------------------------------------------------
 app = Flask(__name__)
-
-CORS(
-    app,
-    resources={
-        r"/api/*": {
-            "origins": [
-                "http://localhost:5173",
-                "https://bizintel.netlify.app"
-            ]
-        }
+CORS(app, resources={
+    r"/api/*": {
+        "origins": [
+            "http://localhost:5173",
+            "https://bizintel.netlify.app"
+        ]
     }
-)
+})
 
-# -------------------------------------------------
-# SIMPLE IN-MEMORY CACHE
-# cache[business_name][question] = response
-# -------------------------------------------------
 cache = {}
 
-# -------------------------------------------------
-# UTIL
-# -------------------------------------------------
 def normalize_url(url: str) -> str:
     if not url.startswith(("http://", "https://")):
         return "https://" + url
     return url
 
-
 # -------------------------------------------------
-# ROUTES
+# Health
 # -------------------------------------------------
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})
 
-
+# -------------------------------------------------
+# Scraper
+# -------------------------------------------------
 @app.route("/api/scrape", methods=["POST"])
 def scrape():
     data = request.get_json(silent=True)
-
     if not data or "url" not in data:
         return jsonify({"error": "URL is required"}), 400
 
@@ -69,17 +56,7 @@ def scrape():
     start = time.time()
 
     try:
-        res = requests.get(
-            url,
-            timeout=15,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0 Safari/537.36"
-                )
-            }
-        )
+        res = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
         res.raise_for_status()
 
         soup = BeautifulSoup(res.text, "html.parser")
@@ -99,29 +76,23 @@ def scrape():
         }
 
         cache.setdefault(business_data["name"], {})
-
         return jsonify(business_data)
 
     except Exception as e:
-        print("SCRAPE ERROR:", repr(e))
-        return jsonify({
-            "error": "Scraping failed",
-            "details": str(e)
-        }), 500
+        return jsonify({"error": "Scraping failed", "details": str(e)}), 500
 
-
+# -------------------------------------------------
+# AI CHAT (NON-STREAMING — STABLE)
+# -------------------------------------------------
 @app.route("/api/chat", methods=["POST"])
 def chat():
     data = request.get_json(silent=True) or {}
 
     message = data.get("message", "").strip()
-    business = data.get("business_data")
+    business = data.get("business_data", {})
 
     if not message:
-        return jsonify({"message": "Please ask a question."}), 400
-
-    if not business:
-        return jsonify({"message": "Please scrape a website first."}), 400
+        return jsonify({"error": "Message is required"}), 400
 
     name = business.get("name", "Unknown Business")
     description = business.get("description", "")
@@ -130,7 +101,7 @@ def chat():
 
     cache.setdefault(name, {})
 
-    # -------- CACHE HIT --------
+    # Cache hit
     if message in cache[name]:
         return jsonify({
             "role": "assistant",
@@ -138,9 +109,6 @@ def chat():
             "cached": True
         })
 
-    # -------------------------------------------------
-    # PROMPT (BUSINESS-FOCUSED, NO HALLUCINATIONS)
-    # -------------------------------------------------
     prompt = f"""
 You are a senior business intelligence consultant.
 
@@ -165,8 +133,6 @@ Rules:
 """
 
     try:
-        model = genai.GenerativeModel(MODEL_NAME)
-
         response = model.generate_content(
             prompt,
             generation_config={
@@ -175,7 +141,10 @@ Rules:
             }
         )
 
-        ai_text = response.text.strip()
+        if not response.candidates:
+            raise RuntimeError("Empty Gemini response")
+
+        ai_text = response.candidates[0].content.parts[0].text.strip()
 
         cache[name][message] = ai_text
 
@@ -186,12 +155,11 @@ Rules:
         })
 
     except Exception as e:
-        print("AI ERROR:", repr(e))
+        print("Gemini error:", e)
         return jsonify({
             "error": "AI generation failed",
             "details": str(e)
         }), 500
-
 
 # -------------------------------------------------
 # ENTRY
