@@ -82,14 +82,14 @@ def scrape():
         return jsonify({"error": "Scraping failed", "details": str(e)}), 500
 
 # -------------------------------------------------
-# AI CHAT (NON-STREAMING — STABLE)
+# AI CHAT (STABLE, NON-STREAMING)
 # -------------------------------------------------
 @app.route("/api/chat", methods=["POST"])
 def chat():
     data = request.get_json(silent=True) or {}
 
     message = data.get("message", "").strip()
-    business = data.get("business_data", {})
+    business = data.get("business_data", {}) or {}
 
     if not message:
         return jsonify({"error": "Message is required"}), 400
@@ -101,7 +101,7 @@ def chat():
 
     cache.setdefault(name, {})
 
-    # Cache hit
+    # ✅ Cache hit
     if message in cache[name]:
         return jsonify({
             "role": "assistant",
@@ -129,6 +129,7 @@ Rules:
 - Base insights ONLY on available information
 - If data is missing, explain logically instead of guessing
 - Provide practical, real-world business insight
+- Be concise but complete
 - No hype, no fluff, no hallucinations
 """
 
@@ -136,15 +137,16 @@ Rules:
         response = model.generate_content(
             prompt,
             generation_config={
-                "temperature": 0.7,
-                "max_output_tokens": 512,
+                "temperature": 0.6,
+                "max_output_tokens": 1024,  # ✅ prevents truncation
             }
         )
 
-        if not response.candidates:
-            raise RuntimeError("Empty Gemini response")
+        # ✅ SAFE extraction
+        ai_text = (response.text or "").strip()
 
-        ai_text = response.candidates[0].content.parts[0].text.strip()
+        if not ai_text:
+            raise RuntimeError("Gemini returned empty response")
 
         cache[name][message] = ai_text
 
@@ -160,10 +162,3 @@ Rules:
             "error": "AI generation failed",
             "details": str(e)
         }), 500
-
-# -------------------------------------------------
-# ENTRY
-# -------------------------------------------------
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
